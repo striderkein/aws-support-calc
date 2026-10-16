@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AWS Support プラン料金計算</title>
+<meta name="description" content="月額 AWS 利用料を入力すると、各 AWS Support プランの請求額（最低料金と従量料率の高い方）を自動計算します。">
+<style>
+  :root {
+    --bg: #f6f7f9; --card: #fff; --ink: #1b1f24; --muted: #5b6470; --line: #e3e6ea;
+    --accent: #0b5fff; --accent-ink: #fff; --win: #0a7f3f; --win-bg: #e8f6ee; --warn: #8a5a00; --warn-bg: #fff6e0;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #0f1216; --card: #171b21; --ink: #e8ebef; --muted: #9aa4b1; --line: #2a3139;
+      --accent: #5b8cff; --win: #4fd48a; --win-bg: #11301f; --warn: #ffcc66; --warn-bg: #2e2410; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 15px/1.6 system-ui, -apple-system, "Segoe UI", "Hiragino Sans", "Noto Sans JP", sans-serif; color: var(--ink); background: var(--bg); }
+  main { max-width: 960px; margin: 0 auto; padding: 32px 20px 64px; }
+  h1 { font-size: 1.6rem; margin: 0 0 4px; }
+  .sub { color: var(--muted); margin: 0 0 24px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 20px; margin-bottom: 20px; }
+  .inputs { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; }
+  label { display: block; font-weight: 600; margin-bottom: 6px; }
+  .hint { font-weight: 400; color: var(--muted); font-size: .85rem; }
+  input[type=number] { width: 100%; font-size: 1.1rem; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--ink); }
+  input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .toggle { display: flex; align-items: center; gap: 8px; font-weight: 500; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { padding: 10px 12px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; font-size: .85rem; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  td.total { font-weight: 700; font-size: 1.05rem; }
+  .basis { display: inline-block; font-size: .75rem; padding: 2px 8px; border-radius: 999px; margin-left: 6px; vertical-align: middle; }
+  .basis.min { background: var(--warn-bg); color: var(--warn); }
+  .basis.pct { background: var(--win-bg); color: var(--win); }
+  .legacy td, .legacy th { color: var(--muted); }
+  .legacy .name small { display: block; font-size: .78rem; }
+  details { margin-top: 8px; }
+  summary { cursor: pointer; color: var(--accent); }
+  .tiers { margin: 8px 0 0; padding-left: 18px; font-size: .9rem; color: var(--muted); }
+  .jpy { color: var(--muted); font-size: .85rem; }
+  footer { color: var(--muted); font-size: .85rem; }
+  footer a { color: var(--accent); }
+  @media (max-width: 640px) { th:nth-child(2), td:nth-child(2) { display: none; } }
+</style>
+</head>
+<body>
+<main>
+  <h1>AWS Support プラン料金計算</h1>
+  <p class="sub">各プランは「月額の最低料金」と「AWS 利用料に対する段階的な従量料率」の<strong>高い方</strong>が請求されます。定額プランはありません。</p>
+
+  <section class="card">
+    <div class="inputs">
+      <div>
+        <label for="charges">月額 AWS 利用料（USD）<span class="hint"> サポート料を除く金額</span></label>
+        <input id="charges" type="number" min="0" step="1" value="1300" inputmode="decimal">
+      </div>
+      <div>
+        <label for="rate">USD → JPY レート<span class="hint"> 任意。円換算の参考表示</span></label>
+        <input id="rate" type="number" min="0" step="0.01" value="150" inputmode="decimal">
+      </div>
+      <div style="align-self:end">
+        <label class="toggle"><input id="legacy" type="checkbox"> 旧プラン（2027-01-01 終了）も表示</label>
+      </div>
+    </div>
+  </section>
+
+  <section class="card">
+    <table aria-live="polite">
+      <thead>
+        <tr>
+          <th>プラン</th>
+          <th class="num">最低料金</th>
+          <th class="num">従量計算額</th>
+          <th class="num">請求額（高い方）</th>
+        </tr>
+      </thead>
+      <tbody id="rows"></tbody>
+    </table>
+    <details>
+      <summary>料率テーブルと計算方法</summary>
+      <div id="tiers"></div>
+      <p class="tiers">従量計算額は累進（ブラケット）方式です。例: Business Support+ で利用料 $12,000 の場合、$10,000 × 9% + $2,000 × 7% = $1,040。</p>
+    </details>
+  </section>
+
+  <footer>
+    出典: <a href="https://aws.amazon.com/premiumsupport/pricing/" target="_blank" rel="noopener">AWS Support Plan Pricing</a>、<a href="https://docs.aws.amazon.com/awssupport/latest/user/support-plans-eos.html" target="_blank" rel="noopener">Developer / Business / Enterprise On-Ramp 終了告知</a>（2026-10-16 時点、商用リージョン）。GovCloud (US) は料率が異なります。正式な金額は AWS の請求で確認してください。
+  </footer>
+</main>
+
+<script>
+  // tiers: [upperBound(USD, Infinity for last), rate]
+  const PLANS = [
+    { name: "Business Support+", min: 29, tiers: [[10000, .09], [80000, .07], [250000, .05], [Infinity, .03]] },
+    { name: "Enterprise Support", min: 5000, tiers: [[150000, .10], [500000, .07], [1000000, .05], [Infinity, .03]] },
+    { name: "Unified Operations", min: 50000, tiers: [[1000000, .10], [5000000, .06], [Infinity, .05]] },
+  ];
+  const LEGACY = [
+    { name: "Developer Support", note: "新規加入不可・2027-01-01 終了", min: 29, tiers: [[Infinity, .03]], legacy: true },
+    { name: "Business Support", note: "新規加入不可・2027-01-01 終了", min: 100, tiers: [[10000, .10], [80000, .07], [250000, .05], [Infinity, .03]], legacy: true },
+  ];
+
+  const usd = n => n.toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 2 });
+  const jpy = n => n.toLocaleString("ja-JP", { style: "currency", currency: "JPY", maximumFractionDigits: 0 });
+  const pct = r => (r * 100).toLocaleString("ja-JP", { maximumFractionDigits: 1 }) + "%";
+
+  function tiered(charges, tiers) {
+    let total = 0, lower = 0;
+    for (const [upper, rate] of tiers) {
+      if (charges <= lower) break;
+      total += (Math.min(charges, upper) - lower) * rate;
+      lower = upper;
+    }
+    return total;
+  }
+
+  function tierText(tiers) {
+    let lower = 0;
+    return tiers.map(([upper, rate]) => {
+      const range = upper === Infinity ? `${usd(lower)} 超` : `${usd(lower)} 〜 ${usd(upper)}`;
+      lower = upper;
+      return `${range}: ${pct(rate)}`;
+    }).join(" / ");
+  }
+
+  function render() {
+    const charges = Math.max(0, Number(document.getElementById("charges").value) || 0);
+    const rate = Number(document.getElementById("rate").value) || 0;
+    const showLegacy = document.getElementById("legacy").checked;
+    const plans = showLegacy ? [...PLANS, ...LEGACY] : PLANS;
+
+    document.getElementById("rows").innerHTML = plans.map(p => {
+      const t = tiered(charges, p.tiers);
+      const billed = Math.max(p.min, t);
+      const basis = t > p.min ? `<span class="basis pct">従量</span>` : `<span class="basis min">最低料金</span>`;
+      const yen = rate > 0 ? `<div class="jpy">≈ ${jpy(billed * rate)}</div>` : "";
+      return `<tr class="${p.legacy ? "legacy" : ""}">
+        <td class="name">${p.name}${p.note ? `<small>${p.note}</small>` : ""}</td>
+        <td class="num">${usd(p.min)}</td>
+        <td class="num">${usd(t)}</td>
+        <td class="num total">${usd(billed)}${basis}${yen}</td>
+      </tr>`;
+    }).join("");
+
+    document.getElementById("tiers").innerHTML = `<ul class="tiers">${plans.map(p =>
+      `<li><strong>${p.name}</strong>: 最低 ${usd(p.min)} / ${tierText(p.tiers)}</li>`).join("")}</ul>`;
+  }
+
+  for (const id of ["charges", "rate", "legacy"]) document.getElementById(id).addEventListener("input", render);
+  render();
+</script>
+</body>
+</html>
